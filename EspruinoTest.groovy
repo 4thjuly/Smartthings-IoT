@@ -32,17 +32,18 @@ def deviceDiscovery() {
 	def options = [:]
 	def devices = getDevices()
 	devices.each {
-		def value = it.value.name ?: "UPnP Device ${it.value.ssdpUSN.split(':')[1][-3..-1]}"
-		def key = it.value.mac
-		options["${key}"] = value
+        def value = "Espruino Device ${it.value.ssdpUSN.split(':')[1][-4..-1]}"
+        def key = it.value.ssdpUSN
+        options["${key}"] = value
 	}
-
-	ssdpSubscribe()
-	ssdpDiscover()
-
-	return dynamicPage(name: "deviceDiscovery", title: "Discovery Started!", nextPage: "", refreshInterval: 5, install: true, uninstall: true) {
-		section("Please wait while we discover your UPnP Device. Discovery can take five minutes or more, so sit back and relax! Select your device below once discovered.") {
-			input "selectedDevices", "enum", required: false, title: "Select Devices (${options.size() ?: 0} found)", multiple: true, options: options
+    
+    unsubscribe();
+    ssdpSubscribe();
+	ssdpDiscover();
+    
+	return dynamicPage(name: "deviceDiscovery", title: "Discovery Started", nextPage: "", refreshInterval: 5, install: true, uninstall: true) {
+		section("Please wait while we discover your device, discovery can take a minutes or more. Select your device below once discovered.") {
+			input "selectedDevices", "enum", required: false, title: "Select Devices (${options.size() ?: 0} found)", multiple: true, options: options, submitOnChange: true
 		}
 	}
 }
@@ -71,9 +72,39 @@ def initialize() {
     
     ssdpSubscribe();
 	ssdpDiscover();
+    
+    if (selectedDevices) {
+		addDevices()
+	}
+    
     runEvery5Minutes("ssdpDiscover");
 }
 
+def addDevices() {
+	def devices = getDevices()
+
+	selectedDevices.each { dni ->
+		def selectedDevice = devices.find { it.value.ssdpUSN == dni }
+		def d
+		if (selectedDevice) {
+			d = getChildDevices()?.find {
+				it.deviceNetworkId == selectedDevice.value.ssdpUSN
+			}
+		}
+
+		if (!d) {
+			log.debug "Creating device with dni: ${selectedDevice.value.ssdpUSN}"
+			addChildDevice("reszolve-com", "Espruino Device", selectedDevice?.value.ssdpUSN, selectedDevice?.value.hub, [
+				"label": selectedDevice?.value?.name ?: "Espruino",
+				"data": [
+					"mac": selectedDevice.value.mac,
+					"ip": selectedDevice.value.networkAddress,
+					"port": selectedDevice.value.deviceAddress
+				]
+			])
+		}
+	}
+}
 
 void ssdpSubscribe() {
 	log.debug "ssdpSubscribe"
@@ -101,23 +132,23 @@ def ssdpHandler(evt) {
     parsedEvent << ["hub":hub]
 
     def devices = getDevices()
-    String ssdpUSN = parsedEvent.ssdpUSN.toString()
-    if (!devices."${ssdpUSN}") {
-        devices << ["${ssdpUSN}": parsedEvent]
-    }
+	def ssdpUSN = parsedEvent.ssdpUSN
+    // log.debug parsedEvent
+	if (devices."${ssdpUSN}") {
+		def d = devices."${ssdpUSN}"
+		if (d.networkAddress != parsedEvent.networkAddress || d.deviceAddress != parsedEvent.deviceAddress) {
+			d.networkAddress = parsedEvent.networkAddress
+			d.deviceAddress = parsedEvent.deviceAddress
+			def child = getChildDevice(ssdpUSN)
+			if (child) {
+				child.sync(parsedEvent.networkAddress, parsedEvent.deviceAddress)
+			}
+		}
+	} else {
+		devices << ["${ssdpUSN}": parsedEvent]
+	}
 }
 
 def parse(String description) {
     log.debug "parse description: $description"
 }
-
-private Integer convertHexToInt(hex) {
-	Integer.parseInt(hex,16)
-}
-
-private String convertHexToIP(hex) {
-	[convertHexToInt(hex[0..1]),convertHexToInt(hex[2..3]),convertHexToInt(hex[4..5]),convertHexToInt(hex[6..7])].join(".")
-}
-
-// TODO: implement event handlers
-
