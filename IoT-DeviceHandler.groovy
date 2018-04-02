@@ -17,37 +17,42 @@ metadata {
 		// TODO: define status and reply messages here
 	}
 
+	// attribute "battery", "NUMBER"
+    // attribute "lightLevel", "NUMBER"
+    // attribute "relay", "ENUM"
 
     tiles {      
-        valueTile("battery", "device.battery", decoration: "flat", height: 1, width: 1, inactiveLabel: false, canChangeIcon: false) {
+        valueTile("BatteryTile", "device.battery", height: 1, width: 1) {
             state "battery", label:'${currentValue}v'
         }
         
-        valueTile("lightLevel", "device.lightLevel", decoration: "flat", height: 1, width: 1, inactiveLabel: false, canChangeIcon: false) {
+        valueTile("LightLevelTile", "device.lightLevel", height: 1, width: 1) {
             state "lightLevel", label:'${currentValue}'
         }
         
-        standardTile("relay", "device.relay", width: 1, height: 1, canChangeIcon: true) {
-            state "off", label: '${currentValue}', action: "switch.on", icon: "st.switches.light.off", backgroundColor: "#ffffff"
-            state "on", label: '${currentValue}', action: "switch.off", icon: "st.switches.light.on", backgroundColor: "#00a0dc"
+        standardTile("SwitchTile", "device.relay", width: 1, height: 1) {
+            state "off", label: 'off', action: "switch.on", icon: "st.switches.light.off", backgroundColor: "#ffffff"
+            state "on", label: 'on', action: "switch.off", icon: "st.switches.light.on", backgroundColor: "#00a0dc"
         }
         
     }
-	main("battery")
+	main("SwitchTile")
 }
 
+/*
 def installed() {
     initialize()
 }
 
 def updated() {
-    unsubscribe()
+    // unsubscribe()
     initialize()
 }
 
 def initialize() {
-    state.deviceIP = 0
+    // state.deviceIP = 0 // Don't reset IP
 }
+*/
 
 def parse(description) {
     //log.debug "Parse: ${description}"
@@ -57,8 +62,9 @@ def parse(description) {
     def body = new String(descMap["body"].decodeBase64())
     def slurper = new JsonSlurper()
     def result = slurper.parseText(body)
-    //log.debug "Headers: ${headers}"
-    log.debug "Parse result: ${result}"
+    // log.debug "Parse Headers: ${headers}"
+    log.debug "Parse Body: ${body}"
+    // log.debug "Parse result: ${result}"
 
 	if (result.containsKey("IP")) {
     	state.deviceIP = result.IP;
@@ -66,18 +72,30 @@ def parse(description) {
     if (result.containsKey("A1")) {
     	def lightLevel = result.A1;
         lightLevel = lightLevel.setScale(3, BigDecimal.ROUND_HALF_UP)
-    	events << createEvent(name:"lightLevel", value:lightLevel, data:result)
+    	events << createEvent(name:"lightLevel", value:lightLevel, isStateChange:true)
     }
     if (result.containsKey("A0")) {
     	def volts = result.A0 * 33.0;
 		volts = volts.setScale(2, BigDecimal.ROUND_HALF_UP)
-    	events << createEvent(name:"battery", value:volts, data:result)
+    	events << createEvent(name:"battery", value:volts, isStateChange:true)
+    }
+    if (result.containsKey("B15")) {
+    	def relayState = result.B15 ? "on" : "off";
+    	events << createEvent(name:"relay", value:relayState, isStateChange:true)
     }
 
     log.debug "Parse events: ${events}"
+    // runIn(5, postParse);
 
     return events
 }
+
+/*
+def postParse() {
+    log.debug "PostParse: ${state.relay}"
+	sendEvent(name:"relay", value:state.relay, displayed:true, isStateChange:true)
+}
+*/
 
 def parseDescriptionAsMap(description) {
 	description.split(",").inject([:]) { map, param ->
@@ -91,8 +109,10 @@ def parseDescriptionAsMap(description) {
 // handle commands
 def on() {
     def deviceIP = state.deviceIP;
-    log.debug "Executing 'on' for ${deviceIP}";
-    if (!deviceIP) return;
+    if (!deviceIP) { 
+	    log.debug "Ignoring 'on', no device IP";
+    	return 
+    };
 	
     def headers = [:] 
     headers.put("HOST", "${deviceIP}:80");
@@ -108,10 +128,12 @@ def on() {
 }
 
 def off() {
-	log.debug "Executing 'off' "
     def deviceIP = state.deviceIP;
-    log.debug "Executing 'on' for ${deviceIP}";
-    if (!deviceIP) return;
+    log.debug "Executing 'off' for ${deviceIP}";
+    if (!deviceIP) { 
+	    log.debug "Ignoring 'off', no device IP";
+    	return 
+    };
 	
     def headers = [:] 
     headers.put("HOST", "${deviceIP}:80");
@@ -130,3 +152,4 @@ def off() {
 def getHubAddress() {
   return device.hub.getDataValue("localIP") + ":" + device.hub.getDataValue("localSrvPortTCP")
 }
+
